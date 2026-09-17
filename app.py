@@ -4,7 +4,7 @@ from PIL import Image
 import numpy as np
 import io
 import os
-import tensorflow as tf
+from tflite_runtime.interpreter import Interpreter
 
 app = FastAPI(title="Alzheimer MRI Classifier API")
 
@@ -18,7 +18,7 @@ app.add_middleware(
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "best_mobilenet_model.tflite")
 
 print("Loading TFLite model...")
-interpreter = tf.lite.Interpreter(model_path=MODEL_PATH)
+interpreter = Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
 print("TFLite model loaded!")
 
