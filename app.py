@@ -4,7 +4,7 @@ from PIL import Image
 import numpy as np
 import io
 import os
-from tflite_runtime.interpreter import Interpreter
+from ai_edge_litert.interpreter import Interpreter
 
 app = FastAPI(title="Alzheimer MRI Classifier API")
 
@@ -15,7 +15,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "best_mobilenet_model.tflite")
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "model_v2.tflite")
 
 print("Loading TFLite model...")
 interpreter = Interpreter(model_path=MODEL_PATH)
@@ -38,7 +38,7 @@ CLASS_TRANSLATIONS = {
 def root():
     return {
         "status": "ok",
-        "service": "NeuroTest Pro - Alzheimer MRI Classifier (TFLite)",
+        "service": "NeuroTest Pro - Alzheimer MRI Classifier",
         "model": "MobileNetV2 TFLite",
         "classes": CLASS_NAMES,
     }
