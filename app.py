@@ -4,7 +4,8 @@ from PIL import Image
 import numpy as np
 import io
 import os
-from ai_edge_litert.interpreter import Interpreter
+import tensorflow as tf
+from tensorflow.keras.applications.densenet import preprocess_input
 
 app = FastAPI(title="Alzheimer MRI Classifier API")
 
@@ -15,17 +16,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "model_v2.tflite")
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "DenseNet121_model1.h5")
 
-print("Loading TFLite model...")
-interpreter = Interpreter(model_path=MODEL_PATH)
-interpreter.allocate_tensors()
-print("TFLite model loaded!")
+print("Loading model...")
+model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+print("Model loaded successfully!")
 
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
-
-CLASS_NAMES = ["MildDemented", "ModerateDemented", "NonDemented", "VeryMildDemented"]
+CLASS_NAMES = [
+    "MildDemented",
+    "ModerateDemented",
+    "NonDemented",
+    "VeryMildDemented",
+]
 
 CLASS_TRANSLATIONS = {
     "MildDemented": {"ar": "خرف خفيف", "fr": "Démence légère", "en": "Mild Demented"},
@@ -39,8 +41,9 @@ def root():
     return {
         "status": "ok",
         "service": "NeuroTest Pro - Alzheimer MRI Classifier",
-        "model": "MobileNetV2 TFLite",
+        "model": "DenseNet121",
         "classes": CLASS_NAMES,
+        "disclaimer": "Outils éducatif uniquement. Ne remplace pas un diagnostic médical.",
     }
 
 @app.get("/health")
@@ -50,6 +53,9 @@ def health():
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     try:
+        if not file.content_type or not file.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="File must be an image")
+
         contents = await file.read()
         if len(contents) == 0:
             raise HTTPException(status_code=400, detail="Empty file")
@@ -57,21 +63,21 @@ async def predict(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="File too large (max 10MB)")
 
         img = Image.open(io.BytesIO(contents)).convert("RGB")
-        img = img.resize((128, 128))
+        img = img.resize((224, 224))
 
         img_array = np.array(img, dtype=np.float32)
-        img_array = (img_array / 127.5) - 1.0
+        img_array = preprocess_input(img_array)
         img_array = np.expand_dims(img_array, axis=0)
 
-        interpreter.set_tensor(input_details[0]['index'], img_array)
-        interpreter.invoke()
-        preds = interpreter.get_tensor(output_details[0]['index'])[0]
+        preds = model.predict(img_array, verbose=0)[0]
 
         predicted_index = int(np.argmax(preds))
         predicted_class = CLASS_NAMES[predicted_index]
         confidence = float(preds[predicted_index]) * 100.0
 
-        all_probs = {name: round(float(preds[i]) * 100.0, 2) for i, name in enumerate(CLASS_NAMES)}
+        all_probs = {}
+        for i, name in enumerate(CLASS_NAMES):
+            all_probs[name] = round(float(preds[i]) * 100.0, 2)
 
         return {
             "success": True,
@@ -84,5 +90,8 @@ async def predict(file: UploadFile = File(...)):
             "disclaimer_en": "This result is educational only.",
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"Prediction error: {e}")
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
