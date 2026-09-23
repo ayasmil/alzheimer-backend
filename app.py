@@ -4,8 +4,7 @@ from PIL import Image
 import numpy as np
 import io
 import os
-import tensorflow as tf
-from tensorflow.keras.applications.densenet import preprocess_input
+from ai_edge_litert.interpreter import Interpreter
 
 app = FastAPI(title="Alzheimer MRI Classifier API")
 
@@ -16,11 +15,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MODEL_PATH = os.path.join(os.path.dirname(__file__), "DenseNet121_model1.h5")
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "DenseNet121_model1.tflite")
 
-print("Loading model...")
-model = tf.keras.models.load_model(MODEL_PATH, compile=False)
-print("Model loaded successfully!")
+print("Loading TFLite model...")
+interpreter = Interpreter(model_path=MODEL_PATH, num_threads=2)
+interpreter.allocate_tensors()
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+print("TFLite model loaded!")
+
+IMG_SIZE = 224
 
 CLASS_NAMES = [
     "MildDemented",
@@ -36,6 +40,16 @@ CLASS_TRANSLATIONS = {
     "VeryMildDemented": {"ar": "خرف خفيف جداً", "fr": "Démence très légère", "en": "Very Mild Demented"},
 }
 
+
+def preprocess_densenet(img):
+    x = np.array(img, dtype=np.float32)
+    x = x / 255.0
+    mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+    std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+    x = (x - mean) / std
+    return x
+
+
 @app.get("/")
 def root():
     return {
@@ -43,12 +57,14 @@ def root():
         "service": "NeuroTest Pro - Alzheimer MRI Classifier",
         "model": "DenseNet121",
         "classes": CLASS_NAMES,
-        "disclaimer": "Outils éducatif uniquement. Ne remplace pas un diagnostic médical.",
+        "disclaimer": "Outil éducatif uniquement. Ne remplace pas un diagnostic médical.",
     }
+
 
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
@@ -63,13 +79,14 @@ async def predict(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="File too large (max 10MB)")
 
         img = Image.open(io.BytesIO(contents)).convert("RGB")
-        img = img.resize((224, 224))
+        img = img.resize((IMG_SIZE, IMG_SIZE))
 
-        img_array = np.array(img, dtype=np.float32)
-        img_array = preprocess_input(img_array)
-        img_array = np.expand_dims(img_array, axis=0)
+        img_array = preprocess_densenet(img)
+        img_array = np.expand_dims(img_array, axis=0).astype(np.float32)
 
-        preds = model.predict(img_array, verbose=0)[0]
+        interpreter.set_tensor(input_details[0]["index"], img_array)
+        interpreter.invoke()
+        preds = interpreter.get_tensor(output_details[0]["index"])[0]
 
         predicted_index = int(np.argmax(preds))
         predicted_class = CLASS_NAMES[predicted_index]
