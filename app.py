@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import numpy as np
@@ -6,7 +6,17 @@ import io
 import os
 from ai_edge_litert.interpreter import Interpreter
 
+# ✅ Rate Limiting
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
 app = FastAPI(title="Alzheimer MRI Classifier API")
+
+# ✅ Rate Limiter — 15 طلب / دقيقة لكل IP
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -67,7 +77,8 @@ def health():
 
 
 @app.post("/predict")
-async def predict(file: UploadFile = File(...)):
+@limiter.limit("15/minute")
+async def predict(request: Request, file: UploadFile = File(...)):
     try:
         if not file.content_type or not file.content_type.startswith("image/"):
             raise HTTPException(status_code=400, detail="File must be an image")
